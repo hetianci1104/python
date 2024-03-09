@@ -1,0 +1,240 @@
+def format_coord(x, y):
+    return 'z=%1.4f, y=%1.4f' % (x, y)
+
+class Plot_refleSystem():
+    # 后续可以根据孔径类型：如圆形，x^2+y^2=R^2，更正画图区域-------------------------------------------- 2022/5/8
+    def __init__(self, system=None, ray=None, stop=None,flag=0):  # stop为光阑的表面序号 flag=1——2D图，=2——3D
+        # super().__init__()
+        self.plot_flag=flag
+        if system is not None:
+            self.system = system
+        else:
+            print('Error in surface data')
+
+        if ray is not None:
+            self.ray_local = ray[1]
+            self.ray_global = ray[0]
+        else:
+            print('Error in ray data')
+
+        if stop is not None:
+            self.stop = stop
+        else:
+            print('Error in stop data')
+
+
+    def stop_yz(self,y_minus,y_max):
+        x = np.zeros(4)  # 这里仅仅考虑yz方向
+        y = np.array([y_minus*1.2, y_minus, y_max*1.2, y_max])
+        z = np.zeros(4)
+        return x, y, z
+
+    def Draw(self,surface_sampling,color_surface,color_ray,width_ray,ax):
+        if self.plot_flag == 1:
+            self.Draw_YZ(surface_sampling,color_surface,color_ray,width_ray,ax)
+        elif self.plot_flag == 2:
+            # self.Draw_XZ()
+            self.Draw_3D(surface_sampling,color_surface,color_ray,width_ray,ax)
+
+    def Draw_3D(self, surface_sampling, color_surface, color_ray, width_ray,ax3):
+        clc_concat = np.concatenate(self.ray_local, axis=2)
+        # 面型采样点
+        plot_num = surface_sampling
+        N_lens = np.shape(self.ray_global)[1]
+        Num_fov = np.shape(self.ray_global)[0]
+        Num_ray = np.shape(self.ray_global)[3]
+        # Aperture_lim仅用于曲面面型 不画起始面 4:-X +X -Y +Y
+        Aperture_lim = np.zeros([N_lens - 1, 4])
+        x_surface = np.zeros([N_lens - 1, plot_num, plot_num])
+        y_surface = np.zeros([N_lens - 1, plot_num, plot_num])
+        z_surface = np.zeros([N_lens - 1, plot_num, plot_num])
+
+        global_surface = np.zeros([N_lens - 1, 3, plot_num*plot_num])
+
+        for i in range(0, N_lens - 1):
+            # -X & +X
+            Aperture_lim[i, 0] = np.min(clc_concat[i + 1, 0])
+            Aperture_lim[i, 1] = np.max(clc_concat[i + 1, 0])
+            # -Y & +Y
+            Aperture_lim[i, 2] = np.min(clc_concat[i + 1, 1])
+            Aperture_lim[i, 3] = np.max(clc_concat[i + 1, 1])
+
+            x_surface[i],y_surface[i],z_surface[i] = self.system[i].sag3D(Aperture_lim[i, 0],Aperture_lim[i, 1],Aperture_lim[i, 2],Aperture_lim[i, 3],plot_num)
+
+            global_surface[i] = self.Coors2global(local_point=np.array([x_surface[i].flatten(), y_surface[i].flatten(), z_surface[i].flatten()]),
+                                                  coord_pos=self.system[i].vertex.clone().detach().cpu().numpy(),
+                                                  coord_rotation=np.array([self.system[i].atilt, 0.0, 0.0]))
+
+            ax3.plot_surface(global_surface[i][0].reshape(plot_num,plot_num),global_surface[i][2].reshape(plot_num,plot_num),global_surface[i][1].reshape(plot_num,plot_num), color=color_surface[i])
+
+        for j in range(0, Num_fov):
+            for i in self.ray_global[j].T[0], self.ray_global[j].T[3], self.ray_global[j].T[4],self.ray_global[j].T[1], self.ray_global[j].T[2]:
+                ax3.plot(i[0, :],i[2, :], i[1, :], color=color_ray[j], linewidth=width_ray[j])
+
+        return self.plot_flag
+    def Draw_YZ(self,surface_sampling,color_surface,color_ray,width_ray,ax):
+        clc_concat = np.concatenate(self.ray_local, axis=2)
+        # 面型采样点
+        plot_num = surface_sampling
+        N_lens = np.shape(self.ray_global)[1]
+        Num_fov = np.shape(self.ray_global)[0]
+        Num_ray = np.shape(self.ray_global)[3]
+        # Aperture_lim仅用于曲面面型 不画起始面 4:-X +X -Y +Y
+        Aperture_lim = np.zeros([N_lens - 1, 4])
+        x_surface = np.zeros([N_lens - 1, plot_num])
+        y_surface = np.zeros([N_lens - 1, plot_num])
+        z_surface = np.zeros([N_lens - 1, plot_num])
+
+        global_surface = np.zeros([N_lens - 1, 3, plot_num])
+
+        arr_y = (np.max(self.ray_global[:, :, 1, :])-np.min(self.ray_global[:, :, 1, :]))/18
+        arr_z = (np.max(self.ray_global[:, :, 2, :]) - np.min(self.ray_global[:, :, 2, :])) / 18
+
+        for i in range(0, N_lens - 1):
+            # -X & +X
+            Aperture_lim[i, 0] = np.min(clc_concat[i + 1, 0])
+            Aperture_lim[i, 1] = np.max(clc_concat[i + 1, 0])
+            # -Y & +Y
+            Aperture_lim[i, 2] = np.min(clc_concat[i + 1, 1])
+            Aperture_lim[i, 3] = np.max(clc_concat[i + 1, 1])
+            # x_surface[i] = np.linspace() # YZ画图默认x为0
+            y_surface[i] = np.linspace(Aperture_lim[i, 2], Aperture_lim[i, 3], plot_num)
+            z_surface[i] = self.system[i].sag2D(x_surface[i], y_surface[i])
+            global_surface[i] = self.Coors2global(local_point=np.array([x_surface[i], y_surface[i], z_surface[i]]),
+                                             coord_pos=self.system[i].vertex.clone().detach().cpu().numpy(),
+                                             coord_rotation=np.array([self.system[i].atilt, 0.0, 0.0]))
+            ax.plot(global_surface[i][2], global_surface[i][1], color=color_surface[i])
+            print(i)
+            # print(global_coors[i][2][-1])
+
+            ax.annotate(text="S %s" % (i + 1), xy=(global_surface[i][2][-1], global_surface[i][1][-1]),
+                        xytext=(global_surface[i][2][-1] + arr_z, global_surface[i][1][-1] + arr_y),
+                        arrowprops=dict(arrowstyle='->'))
+
+        for j in range(0, Num_fov):
+            for i in self.ray_global[j].T[0], self.ray_global[j].T[3], self.ray_global[j].T[4]:
+                ax.plot(i[2, :], i[1, :], color=color_ray[j], linewidth=width_ray[j])
+
+        # ax.set_title('2D YZ-PLANE')
+        ax.set_xlabel('Z in Global')
+        ax.set_ylabel('Y in Global')
+        ax.format_coord = format_coord
+        ax.set_aspect(1)
+        # ax.axis('off')
+        axis = plt.gca()  # gca:get current axis得到当前轴
+        axis.spines['right'].set_color('none')
+        axis.spines['top'].set_color('none')
+
+        self.plot_flag = 1
+
+        # plt.show()
+
+        return self.plot_flag
+
+    def Draw_XZ(self):
+
+        return None
+
+    def Coors2global(self,local_point=np.array([0.0, 0.0, 0.0]), coord_pos=np.array([0.0, 0.0, 0.0]),
+                     coord_rotation=np.array([0.0, 0.0, 0.0])):
+        coord_pos = coord_pos.reshape(-1)
+        # 上述的rotation为度数,需要转换为rad
+        coord_rotation = coord_rotation * math.pi / 180.0
+        # 这里在最后插入一行的目的是便于直接对偏心矩阵进行相乘，采用全矩阵乘法省去了先旋转再相加的
+        if self.plot_flag==1:
+            local_point = np.insert(local_point, 3, np.ones(local_point.shape[1]), axis=0)
+
+        elif self.plot_flag==2:
+            print('test')
+            print(local_point.shape)
+            local_point = np.insert(local_point, 3, np.ones(local_point.shape[1]), axis=0)
+
+
+        # 旋转矩阵和偏心矩阵定义，参照【KrakenOS: Python-based general exact ray tracing library】论文第5页
+        rotation_matrix_alpha = np.array(
+            [[1.0, 0.0, 0.0, 0.0], [0.0, math.cos(coord_rotation[0]), math.sin(coord_rotation[0]), 0.0],
+             [0.0, -math.sin(coord_rotation[0]), math.cos(coord_rotation[0]), 0.0], [0.0, 0.0, 0.0, 1.0]])
+        rotation_matrix_beta = np.array(
+            [[math.cos(coord_rotation[1]), 0.0, -math.sin(coord_rotation[1]), 0.0], [0.0, 1.0, 0.0, 0.0],
+             [math.sin(coord_rotation[1]), 0.0, math.cos(coord_rotation[1]), 0.0], [0.0, 0.0, 0.0, 1.0]])
+        rotation_matrix_gamma = np.array([[math.cos(coord_rotation[2]), -math.sin(coord_rotation[2]), 0.0, 0.0],
+                                          [math.sin(coord_rotation[2]), math.cos(coord_rotation[2]), 0.0, 0.0],
+                                          [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+        rotation_matrix = np.dot(rotation_matrix_beta.dot(rotation_matrix_gamma), rotation_matrix_alpha)
+        print(coord_pos)
+        decenter_matrix = np.array([[1.0, 0.0, 0.0, coord_pos[0]], [0.0, 1.0, 0.0, coord_pos[1]],
+                                    [0.0, 0.0, 1.0, coord_pos[2]], [0.0, 0.0, 0.0, 1.0]])
+        global_coors = np.dot(decenter_matrix, rotation_matrix.dot(local_point))
+        return global_coors[:-1, :]  # 去除最开始添加的一行
+
+# 【局部坐标转为全局坐标】——数据格式为(3,n)，第一行为x，2y，3z
+def Coors2global(local_point=np.array([0.0, 0.0, 0.0]), coord_pos=np.array([0.0, 0.0, 0.0]),
+                              coord_rotation=np.array([0.0, 0.0, 0.0])):
+    print('----------------------coord_pos size-----------------------')
+    coord_pos = coord_pos.reshape(-1)
+    # 上述的rotation为度数,需要转换为rad
+    coord_rotation = coord_rotation * math.pi/180.0
+    #               2D!!!!YZ平面，这里在最后插入一行的目的是便于直接对偏心矩阵进行相乘，采用全矩阵乘法省去了先旋转再相加的
+    local_point = np.insert(local_point, 3, np.ones(local_point.shape[1]), axis=0)
+    print(local_point.shape[1])
+
+    # 旋转矩阵和偏心矩阵定义，参照【KrakenOS: Python-based general exact ray tracing library】论文第5页
+    rotation_matrix_alpha = np.array(
+        [[1.0, 0.0, 0.0, 0.0], [0.0, math.cos(coord_rotation[0]), math.sin(coord_rotation[0]), 0.0],
+         [0.0, -math.sin(coord_rotation[0]), math.cos(coord_rotation[0]), 0.0],[0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix_beta = np.array(
+        [[math.cos(coord_rotation[1]), 0.0, -math.sin(coord_rotation[1]),0.0], [0.0, 1.0, 0.0, 0.0],
+         [math.sin(coord_rotation[1]), 0.0, math.cos(coord_rotation[1]), 0.0],[0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix_gamma = np.array([[math.cos(coord_rotation[2]), -math.sin(coord_rotation[2]), 0.0, 0.0],
+                                      [math.sin(coord_rotation[2]), math.cos(coord_rotation[2]), 0.0, 0.0],
+                                      [0.0, 0.0, 1.0, 0.0],[0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix = np.dot(rotation_matrix_beta.dot(rotation_matrix_gamma), rotation_matrix_alpha)
+
+    decenter_matrix = np.array([[1.0, 0.0, 0.0, coord_pos[0]], [0.0, 1.0, 0.0, coord_pos[1]],
+                                [0.0, 0.0, 1.0, coord_pos[2]], [0.0, 0.0, 0.0, 1.0]])
+
+    global_coors = np.dot(decenter_matrix, rotation_matrix.dot(local_point))
+    return global_coors[:-1, :] # 去除最开始添加的一行
+
+# 【全局转局部】
+# coord_pos为全局坐标，实际上是CODE V中的偏心XDE/YDE/ZDE
+def Coors2local(coord_pos=np.array([0.0, 0.0, 0.0]),global_pos=np.array([0.0, 0.0, 0.0]),coord_rotation=np.array([0.0, 0.0, 0.0])):
+    # 上述的rotation为度数,需要转换为rad
+    coord_rotation = coord_rotation * math.pi/180.0
+    #               2D!!!!YZ平面，这里在最后插入一行的目的是便于直接对偏心矩阵进行相乘，采用全矩阵乘法省去了先旋转再相加的
+    coord_pos = np.insert(coord_pos, 3, np.ones(coord_pos.shape[1]), axis=0)
+    print(coord_pos.shape[1])
+
+    # 旋转矩阵和偏心矩阵定义，参照【KrakenOS: Python-based general exact ray tracing library】论文第5页
+    rotation_matrix_alpha = np.array(
+        [[1.0, 0.0, 0.0, 0.0], [0.0, math.cos(coord_rotation[0]), -math.sin(coord_rotation[0]), 0.0],
+         [0.0, math.sin(coord_rotation[0]), math.cos(coord_rotation[0]), 0.0], [0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix_beta = np.array(
+        [[math.cos(coord_rotation[1]), 0.0, math.sin(coord_rotation[1]), 0.0], [0.0, 1.0, 0.0, 0.0],
+         [-math.sin(coord_rotation[1]), 0.0, math.cos(coord_rotation[1]), 0.0], [0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix_gamma = np.array([[math.cos(coord_rotation[2]), math.sin(coord_rotation[2]), 0.0, 0.0],
+                                      [-math.sin(coord_rotation[2]), math.cos(coord_rotation[2]), 0.0, 0.0],
+                                      [0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 1.0]])
+    rotation_matrix = np.dot(rotation_matrix_beta.dot(rotation_matrix_gamma), rotation_matrix_alpha)
+    decenter_matrix = np.array([[1.0, 0.0, 0.0, -global_pos[0]], [0.0, 1.0, 0.0, -global_pos[1]],
+                                [0.0, 0.0, 1.0, -global_pos[2]], [0.0, 0.0, 0.0, 1.0]])
+    local_coors = np.dot(rotation_matrix, decenter_matrix.dot(coord_pos))
+    return local_coors[:-2, :] # 去除最开始添加的一行
+
+class Puipil(): # position为全局坐标系 aperture为局部坐标
+    def __init__(self, radius=np.inf, position=np.array([0.0, 0.0, 0.0]),
+                 rotation=np.array([0.0, 0.0, 0.0]), aperture=np.array([-10.0, 10.0, -10.0, 10.0])):  # alpha, beta, gamma
+        self.radius = radius
+        self.curvature = 1/self.radius
+        self.position = position
+        self.rotation = rotation
+        self.aperture = aperture   # optical region for ray-tracing and calculation: x_low, x_up, y_low, y_up
+        self.edge = 1.2*aperture
+        self.aperture_shape = "circle"  # 上面可以考虑改成Aperture diameter
+
+    # 这里的x,y是局部坐标的,且应该是经过偏心和倾斜的坐标
+    def surface_sag(self):  # only for less than semi-sphere condition
+        x = np.zeros(4) # 这里仅仅考虑yz方向
+        y = np.array([self.edge[-2],self.aperture[-2],self.edge[-1],self.aperture[-1]])
+        z = np.zeros(4)
+        return x, y, z
